@@ -17,7 +17,7 @@ def certification_verification(request):
         if mode == "subscribe" and token == VERIFY_TOKEN:
             return True
     else:
-        return abort(403)
+        return False
 
 
 def authorized():
