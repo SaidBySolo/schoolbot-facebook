@@ -42,7 +42,7 @@ async def _verify_webhook(request):
     challenge = request.args.get("hub.challenge")
 
     if not challenge:
-        abort(400)
+        return abort(400)
 
     return response.text(challenge)
 
