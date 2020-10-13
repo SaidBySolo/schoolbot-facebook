@@ -1,63 +1,72 @@
+import os
+
+import aiohttp
+
+import neispy
+
 from sanic import Sanic
-from functools import wraps
-from sanic.exceptions import abort
-from sanic.response import json
 from sanic import response
+from sanic.exceptions import abort
 
 app = Sanic(__name__)
 
-VERIFY_TOKEN = ""
+PAGE_ACCESS_TOKEN = os.environ["PAGE_ACCESS_TOKEN"]
 
 
-def certification_verification(request):
+async def call_send_api(sender_psid, response):
+    request_body = {"recipient": {"id": sender_psid}, "message": response}
+    qs = {"access_token": PAGE_ACCESS_TOKEN}
+    try:
+        async with aiohttp.ClientSession() as cs:
+            async with cs.post(
+                "https://graph.facebook.com/v2.6/me/messages",
+                json=request_body,
+                params=qs,
+            ) as r:
+                print("message sent")
+    except Exception as err:
+        print("Unable to send message:" + err)
+
+
+async def handle_message(sender_psid, received_message):
+    if received_message.get("text"):
+        response = {
+            "text": f"""You sent the message: "{received_message["text"]}". Now send me an attachment!"""
+        }
+    await call_send_api(sender_psid, response)
+
+
+@app.listener("before_server_start")
+async def init_neispy_client(app, loop):
+    app.neispy = neispy.Client()
+
+
+@app.get("/webhook")
+async def _verify_webhook(request):
+    VERIFY_TOKEN = "<YOUR_VERIFY_TOKEN>"
+    challenge = request.args.get("hub.challenge")
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
 
     if mode and token:
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            return True
-    else:
-        return False
-
-
-def authorized():
-    def decorator(f):
-        @wraps(f)
-        async def decorated_function(request, *args, **kwargs):
-            is_authorized = certification_verification(request)
-            if is_authorized:
-                response = await f(request, *args, **kwargs)
-                return response
-            else:
-                return json({"status": 403, "message": "not_authorized"}, 403)
-
-        return decorated_function
-
-    return decorator
-
-
-@app.get("/webhook")
-@authorized()
-async def _verify_webhook(request):
-    challenge = request.args.get("hub.challenge")
-
-    if not challenge:
-        return abort(400)
-
-    return response.text(challenge)
+            print("WEBHOOK_VERIFIED")
+            return response.text(challenge)
+        else:
+            return abort(403)
 
 
 @app.post("/webhook")
 async def _webhook(request):
-    page = request.json.get("object")
-    entry = request.json.get("entry")
+    body = request.json
+    if body.get("object") == "page":
+        for messaging in body.get("entry"):
+            webhook_event = messaging["messaging"][0]
+            sender_psid = webhook_event["sender"]["id"]
+            if webhook_event.get("message"):
+                await handle_message(sender_psid, webhook_event["message"])
 
-    if page == "page":
-        for messaging in entry:
-            webhook_event = messaging["messaging"][0]["message"]
-            print(webhook_event)
-            return json({"status": 200})
-
+            return response.text("EVENT_RECEIVED")
     else:
         return abort(404)
 
