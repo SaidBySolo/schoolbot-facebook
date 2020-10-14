@@ -28,17 +28,29 @@ async def call_send_api(sender_psid, response):
         print("Unable to send message:" + err)
 
 
+async def get_code(schoolname):
+    neispy_client = neispy.Client()
+    school_info = await neispy_client.schoolInfo(SCHUL_NM=schoolname)
+    ae = school_info[0].ATPT_OFCDC_SC_CODE
+    se = school_info[0].SD_SCHUL_CODE
+    return ae, se, neispy_client
+
+
+async def get_meal(schoolname):
+    ae, se, neispy_client = await get_code(schoolname)
+    scmeal = await neispy_client.mealServiceDietInfo(ae, se, MLSV_YMD=20190122)
+    meal = scmeal[0].DDISH_NM.replace("<br/>", "\n")
+    return meal
+
+
 async def handle_message(sender_psid, received_message):
-    if received_message.get("text"):
-        response = {
-            "text": f"""You sent the message: "{received_message["text"]}". Now send me an attachment!"""
-        }
+    text: str = received_message.get("text")
+    if text:
+        if text.startswith("!급식"):
+            arg = text[3:].strip()
+            meal = get_meal(arg[0])
+            response = {"text": f"오늘의 급식이에요\n{meal}"}
     await call_send_api(sender_psid, response)
-
-
-@app.listener("before_server_start")
-async def init_neispy_client(app, loop):
-    app.neispy = neispy.Client()
 
 
 @app.get("/webhook")
